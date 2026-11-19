@@ -12,7 +12,7 @@ import { isSpotFree } from '../../store/reducer';
 import { BookingDraft, UProps, useUNav } from '../../navigation/types';
 import { countdown, date, dateTime, duration, euro, startOfDay, time, uid } from '../../utils/format';
 import { bookingCode, canChange, changeDeadline, fractions, fractionValue, hoursError, price, spotStateFor } from '../../utils/rules';
-import { PaymentMethod } from '../../types/models';
+import { Park, PaymentMethod, VehicleType } from '../../types/models';
 
 const STEPS = ['Dados', 'Lugar', 'Pagamento', 'Confirmação'];
 
@@ -62,21 +62,7 @@ export function ChooseSpotScreen({ route, navigation }: UProps<'ChooseSpot'>) {
   const { state, now } = useApp();
   const park = state.parks.find((p) => p.id === draft.parkId)!;
   const v = vehicleById(state, draft.vehicleId)!;
-  const [floorId, setFloorId] = useState<string>('todos');
   const [spotId, setSpotId] = useState<string | undefined>(draft.spotId);
-  const parkBookings = useMemo(() => state.bookings.filter((b) => b.parkId === park.id), [state.bookings, park.id]);
-
-  const floors = park.floors.map((f) => {
-    const items: GridItem[] = f.spots.map((s) => {
-      let st = spotStateFor(s, parkBookings, draft.start, draft.end, now);
-      if (st === 'bloqueado') st = 'desativado';
-      if (st === 'livre' && v.type === 'automovel' && s.kind === 'motociclo') st = 'desativado';
-      return { spot: s, state: st, sub: s.kind === 'mobilidade' ? 'Mob. reduzida' : s.kind === 'motociclo' ? 'Motociclo' : undefined };
-    });
-    return { floor: f, items, free: items.filter((i) => i.state === 'livre').length };
-  });
-  const totalFree = floors.reduce((a, f) => a + f.free, 0);
-  const shown = floorId === 'todos' ? floors : floors.filter((f) => f.floor.id === floorId);
   const chosen = spotId ? spotLabel(state, spotId) : null;
   const amount = price(park, v.type, draft.start, draft.end);
 
@@ -103,6 +89,34 @@ export function ChooseSpotScreen({ route, navigation }: UProps<'ChooseSpot'>) {
       <Stepper steps={STEPS} current={1} />
       <Text style={{ fontWeight: '800', fontSize: 15 }}>{date(draft.start)} · {time(draft.start)}–{time(draft.end)}</Text>
       <Text style={{ color: colors.muted, marginBottom: 10 }}>Disponibilidade para o período selecionado</Text>
+      <SpotPicker park={park} vehicleType={v.type} start={draft.start} end={draft.end} selectedId={spotId} onSelect={setSpotId} />
+    </Screen>
+  );
+}
+
+/** Mapa de lugares de um parque para um período, com filtro por piso (usado ao reservar e ao alterar). */
+function SpotPicker({ park, vehicleType, start, end, selectedId, onSelect, ignoreBookingId }: {
+  park: Park; vehicleType: VehicleType; start: number; end: number;
+  selectedId?: string; onSelect: (spotId: string) => void; ignoreBookingId?: string;
+}) {
+  const { state, now } = useApp();
+  const [floorId, setFloorId] = useState<string>('todos');
+  const parkBookings = useMemo(() => state.bookings.filter((b) => b.parkId === park.id), [state.bookings, park.id]);
+
+  const floors = park.floors.map((f) => {
+    const items: GridItem[] = f.spots.map((s) => {
+      let st = spotStateFor(s, parkBookings, start, end, now, ignoreBookingId);
+      if (st === 'bloqueado') st = 'desativado';
+      if (st === 'livre' && vehicleType === 'automovel' && s.kind === 'motociclo') st = 'desativado';
+      return { spot: s, state: st, sub: s.kind === 'mobilidade' ? 'Mob. reduzida' : s.kind === 'motociclo' ? 'Motociclo' : undefined };
+    });
+    return { floor: f, items, free: items.filter((i) => i.state === 'livre').length };
+  });
+  const totalFree = floors.reduce((a, f) => a + f.free, 0);
+  const shown = floorId === 'todos' ? floors : floors.filter((f) => f.floor.id === floorId);
+
+  return (
+    <>
       <ChipGroup
         value={floorId}
         onChange={setFloorId}
@@ -114,12 +128,12 @@ export function ChooseSpotScreen({ route, navigation }: UProps<'ChooseSpot'>) {
             <Text style={{ fontWeight: '800' }}>{floor.name} · Zona {floor.zone}</Text>
             <Badge label={`${free} livres`} tone={free ? 'success' : 'neutral'} />
           </View>
-          <SpotGrid items={items} columns={5} selectedId={spotId} onPress={(i) => i.state === 'livre' && setSpotId(i.spot.id)} entrance={`Entrada · ${park.address.split(',')[0]}`} />
+          <SpotGrid items={items} columns={5} selectedId={selectedId} onPress={(i) => i.state === 'livre' && onSelect(i.spot.id)} entrance={`Entrada · ${park.address.split(',')[0]}`} />
         </Card>
       ))}
       <SpotLegend states={['livre', 'ocupado', 'reservado', 'desativado', 'escolhido']} />
-      {totalFree === 0 && <InfoBox tone="danger" text="Não há lugares livres para este período. Volte atrás e escolha outro horário." />}
-    </Screen>
+      {totalFree === 0 && <InfoBox tone="danger" text="Não há lugares livres para este período. Escolha outro horário." />}
+    </>
   );
 }
 
@@ -199,6 +213,8 @@ export function BookingScreen({ route, navigation }: UProps<'Booking'>) {
   const deadline = changeDeadline(b);
   const sb = statusBadge.booking(b.status, b.refunded);
   const cancelled = b.status === 'cancelada';
+  // Uma estadia em curso por veículo: outro veículo do mesmo utente pode estar no parque em simultâneo.
+  const vehicleBusy = state.bookings.some((x) => x.id !== b.id && x.vehicleId === b.vehicleId && x.status === 'em_curso');
 
   const header = cancelled
     ? { icon: 'close-circle' as const, color: colors.danger, title: 'Reserva cancelada', text: b.refunded ? 'O reembolso foi processado com sucesso.' : 'Esta reserva foi cancelada.' }
@@ -251,7 +267,11 @@ export function BookingScreen({ route, navigation }: UProps<'Booking'>) {
         </View>
       )}
       {b.status === 'confirmada' && now >= b.start - 15 * 60000 && (
-        <Button title="Simular entrada (leitura do QR)" variant="accent" icon="qr-code-outline" onPress={() => dispatch({ type: 'CHECK_IN', bookingId: b.id, now })} style={{ marginBottom: 10 }} />
+        vehicleBusy ? (
+          <InfoBox tone="warning" text={`O veículo ${v.plate} já tem uma estadia em curso. Termine-a antes de entrar com esta reserva.`} />
+        ) : (
+          <Button title="Simular entrada (leitura do QR)" variant="accent" icon="qr-code-outline" onPress={() => dispatch({ type: 'CHECK_IN', bookingId: b.id, now })} style={{ marginBottom: 10 }} />
+        )
       )}
       {b.status === 'em_curso' && (
         <Button title="Simular saída (leitura do QR)" variant="accent" icon="exit-outline" onPress={() => dispatch({ type: 'END_STAY', bookingId: b.id, now })} style={{ marginBottom: 10 }} />
@@ -282,12 +302,17 @@ export function EditBookingScreen({ route, navigation }: UProps<'EditBooking'>) 
   const v = vehicleById(state, b.vehicleId)!;
   const sp = spotLabel(state, b.spotId)!;
   const [period, setPeriod] = useState<Period>({ day: startOfDay(b.start), start: time(b.start), end: time(b.end) });
+  const [spotId, setSpotId] = useState(b.spotId);
+  const [picking, setPicking] = useState(false);
   const ts = periodToTs(period);
   const error = ts ? (ts.start < now + 60 * 60000 ? 'A nova entrada tem de ser pelo menos 1 hora depois de agora.' : hoursError(park, ts.start, ts.end)) : null;
-  const sameSpotFree = ts && !error ? isSpotFree(state, b.spotId, ts.start, ts.end, now, b.id) : true;
-  const altSpot = ts && !error && !sameSpotFree
-    ? park.floors.flatMap((f) => f.spots).find((s) => s.kind === 'normal' && isSpotFree(state, s.id, ts.start, ts.end, now, b.id))
+  const valid = ts && !error ? ts : null;
+  const chosen = spotLabel(state, spotId)!;
+  const chosenFree = valid ? isSpotFree(state, spotId, valid.start, valid.end, now, b.id) : true;
+  const altSpot = valid && !chosenFree
+    ? park.floors.flatMap((f) => f.spots).find((s) => (v.type === 'motociclo' || s.kind === 'normal') && isSpotFree(state, s.id, valid.start, valid.end, now, b.id))
     : undefined;
+  const finalSpotId = chosenFree ? spotId : altSpot?.id;
 
   if (!canChange(b, now)) {
     return <Screen title="Alterar reserva" back><InfoBox tone="danger" text="O prazo para alterar esta reserva terminou (1 hora antes da entrada)." /></Screen>;
@@ -297,19 +322,36 @@ export function EditBookingScreen({ route, navigation }: UProps<'EditBooking'>) 
     <Screen
       title="Alterar reserva"
       back
-      footer={<Button title="Rever alteração" disabled={!ts || !!error || (!sameSpotFree && !altSpot)} onPress={() => ts && navigation.navigate('ReviewChange', { id: b.id, start: ts.start, end: ts.end, spotId: sameSpotFree ? b.spotId : altSpot!.id })} />}
+      footer={<Button title="Rever alteração" disabled={!valid || !finalSpotId} onPress={() => valid && finalSpotId && navigation.navigate('ReviewChange', { id: b.id, start: valid.start, end: valid.end, spotId: finalSpotId })} />}
     >
       <Text style={{ color: colors.muted, marginBottom: 12 }}>Estes são os dados atuais da sua reserva. Ajuste o que precisar antes de confirmar.</Text>
-      <Card>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <Text style={{ fontWeight: '800', fontSize: 16 }}>Lugar {sp.code}</Text>
-          <Badge label="Atual" />
+      <Card onPress={() => setPicking((p) => !p)}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={{ fontWeight: '800', fontSize: 16 }}>Lugar {chosen.code}</Text>
+          <Badge label={spotId === b.spotId ? 'Atual' : 'Novo'} tone={spotId === b.spotId ? undefined : 'success'} />
         </View>
-        <Text style={{ color: colors.muted }}>{sp.floor} · {sp.zone} · {v.plate}</Text>
+        <Text style={{ color: colors.muted }}>{chosen.floor} · {chosen.zone} · {v.plate}</Text>
+        {spotId !== b.spotId && <Text style={{ color: colors.muted, fontSize: 12, marginTop: 2 }}>Antes: lugar {sp.code}</Text>}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 }}>
+          <Ionicons name={picking ? 'chevron-up' : 'swap-horizontal'} size={16} color={colors.primary} />
+          <Text style={{ color: colors.primary, fontWeight: '700' }}>{picking ? 'Fechar mapa de lugares' : 'Alterar lugar'}</Text>
+        </View>
       </Card>
+      {picking && (
+        <>
+          <Text style={{ color: colors.muted, marginBottom: 10 }}>
+            Disponibilidade para {valid ? `${date(valid.start)} · ${time(valid.start)}–${time(valid.end)}` : 'o período atual'}. Toque num lugar livre.
+          </Text>
+          <SpotPicker
+            park={park} vehicleType={v.type} ignoreBookingId={b.id}
+            start={valid?.start ?? b.start} end={valid?.end ?? b.end}
+            selectedId={spotId} onSelect={(id) => { setSpotId(id); setPicking(false); }}
+          />
+        </>
+      )}
       <PeriodFields value={period} onChange={setPeriod} now={now} error={error} />
-      {!sameSpotFree && altSpot && <InfoBox tone="warning" text={`O lugar ${sp.code} já está ocupado no novo período. Será mudado para ${spotLabel(state, altSpot.id)?.code}.`} />}
-      {!sameSpotFree && !altSpot && <InfoBox tone="danger" text="Não há lugares livres para o novo período." />}
+      {!chosenFree && altSpot && <InfoBox tone="warning" text={`O lugar ${chosen.code} já está ocupado no novo período. Será mudado para ${spotLabel(state, altSpot.id)?.code}, ou escolha outro em "Alterar lugar".`} />}
+      {!chosenFree && !altSpot && <InfoBox tone="danger" text="Não há lugares livres para o novo período." />}
       <PriceSummary park={park} type={v.type} start={ts?.start} end={ts?.end} invalid={!!error} />
       <InfoBox text={`Alterações e cancelamento até ${dateTime(changeDeadline(b))}. Sem taxas dentro do prazo. A diferença será paga ou reembolsada por ${b.method ?? 'MB WAY'}.`} />
     </Screen>
@@ -350,7 +392,7 @@ export function ReviewChangeScreen({ route, navigation }: UProps<'ReviewChange'>
       </Card>
       <Card tone="info">
         <InfoRow label="Novo período" value={`${date(start)} · ${time(start)}–${time(end)}`} />
-        <InfoRow label="Lugar" value={`${sp.code} · ${sp.floor}`} />
+        <InfoRow label="Lugar" value={spotId === b.spotId ? `${sp.code} · ${sp.floor}` : `${spotLabel(state, b.spotId)?.code} → ${sp.code} · ${sp.floor}`} />
         <InfoRow label="Novo total" value={euro(newAmount)} strong />
         <Divider />
         {diff > 0 && <InfoRow label="Valor a pagar a mais" value={`+${euro(diff)}`} strong valueColor={colors.warning} />}

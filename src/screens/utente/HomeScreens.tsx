@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Badge, Button, Card, EmptyState, InfoBox, InfoRow, ParkSelector, Screen, SectionTitle, TextField } from '../../components';
 import { colors, radius } from '../../theme';
 import { useApp, useMe } from '../../store/AppContext';
-import { activePass, nextBooking, spotLabel, unread, vehicleById } from '../../store/selectors';
+import { activePasses, spotLabel, unread, vehicleById } from '../../store/selectors';
 import { UProps, useUNav } from '../../navigation/types';
 import { date, dateTime, duration, euro, longDate, time } from '../../utils/format';
 import { parkOccupancy, freeSpotsFor } from '../../utils/rules';
@@ -14,8 +14,12 @@ export function HomeScreen() {
   const { state, park, now } = useApp();
   const me = useMe();
   const occ = parkOccupancy(state, park, now);
-  const next = nextBooking(state, me.id, now);
-  const pass = activePass(state, me.id, park.id, now);
+  // Pode haver várias estadias em curso (uma por veículo); a próxima reserva é a confirmada mais próxima.
+  const live = state.bookings.filter((b) => b.userId === me.id && b.status === 'em_curso').sort((a, b) => (b.checkIn ?? b.start) - (a.checkIn ?? a.start));
+  const next = state.bookings
+    .filter((b) => b.userId === me.id && b.status === 'confirmada' && b.end > now)
+    .sort((a, b) => a.start - b.start)[0];
+  const passes = activePasses(state, me.id, park.id, now);
   const unreadCount = unread(state, me.id);
   const first = me.name.split(' ')[0];
 
@@ -52,22 +56,28 @@ export function HomeScreen() {
         <Button title="Entrar agora" icon="enter-outline" variant="accent" onPress={() => nav.navigate('Immediate')} style={{ flex: 1 }} disabled={me.status !== 'ativa'} />
       </View>
 
-      <SectionTitle title={next?.status === 'em_curso' ? 'Estadia em curso' : 'A sua próxima reserva'} />
+      {live.length > 0 && (
+        <>
+          <SectionTitle title={live.length > 1 ? `Estadias em curso (${live.length})` : 'Estadia em curso'} />
+          {live.map((b) => <NextBookingCard key={b.id} id={b.id} />)}
+        </>
+      )}
+      {(next || !live.length) && <SectionTitle title="A sua próxima reserva" />}
       {next ? (
         <NextBookingCard id={next.id} />
-      ) : (
+      ) : !live.length && (
         <EmptyState icon="calendar-clear-outline" title="Sem reservas futuras" text="Reserve com antecedência e garanta o seu lugar." />
       )}
 
-      {pass && (
-        <Card onPress={() => nav.navigate('UtenteTabs', { screen: 'Avencas' })}>
+      {passes.map((pass) => (
+        <Card key={pass.id} onPress={() => nav.navigate('UtenteTabs', { screen: 'Avencas' })}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text style={{ fontWeight: '800', fontSize: 15 }}>Avença {pass.plan === '24h' ? 'mensal 24 horas' : 'mensal diurna'}</Text>
             <Badge label="Ativa" tone="success" />
           </View>
           <Text style={{ color: colors.muted, marginTop: 4 }}>Válida até {date(pass.to)} · {vehicleById(state, pass.vehicleId)?.plate}</Text>
         </Card>
-      )}
+      ))}
 
       <InfoBox tone="warning" icon="qr-code-outline" title="Entrada e saída sem complicações" text="Tenha o QR Code da reserva pronto junto à cancela." />
     </Screen>

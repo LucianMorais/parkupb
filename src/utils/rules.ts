@@ -61,9 +61,14 @@ export function findSpot(state: AppState, spotId: string): { park: Park; spot: S
 
 const overlaps = (a1: number, a2: number, b1: number, b2: number) => a1 < b2 && b1 < a2;
 
-/** Fim efetivo de uma estadia em curso (se excedeu, conta até agora). */
+/**
+ * Fim efetivo de uma estadia.
+ * Se uma estadia em curso já excedeu a hora de saída, o veículo continua no lugar e não se sabe
+ * quando sai: o lugar fica ocupado até ser registada a saída (pelo utente ou pelo gestor).
+ */
 function effectiveEnd(b: Booking, now: number) {
-  return b.status === 'em_curso' ? Math.max(b.end, now) : b.end;
+  if (b.status !== 'em_curso') return b.end;
+  return b.end > now ? b.end : Infinity;
 }
 
 /** Estado de um lugar num período (vista virtual do utente, RFC4). */

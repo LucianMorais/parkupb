@@ -6,7 +6,7 @@ import {
 } from '../../components';
 import { colors } from '../../theme';
 import { useApp, useMe } from '../../store/AppContext';
-import { activePass, spotLabel, vehicleById, vehiclesOf } from '../../store/selectors';
+import { activePasses, spotLabel, vehicleById, vehiclePass, vehiclesOf } from '../../store/selectors';
 import { UProps, useUNav } from '../../navigation/types';
 import { DAY, date, dateTime, duration, euro, time } from '../../utils/format';
 import { freeSpotsFor, hoursError, price } from '../../utils/rules';
@@ -17,11 +17,13 @@ export function ImmediateScreen({ navigation }: UProps<'Immediate'>) {
   const { state, park, now, dispatch } = useApp();
   const me = useMe();
   const vehicles = vehiclesOf(state, me.id);
-  const [vehicleId, setVehicleId] = useState(vehicles[0]?.id);
+  // Só pode haver uma estadia em curso por veículo (veículos diferentes podem estar no parque ao mesmo tempo).
+  const liveOf = (vid: string) => state.bookings.find((b) => b.userId === me.id && b.vehicleId === vid && b.status === 'em_curso');
+  const [vehicleId, setVehicleId] = useState((vehicles.find((x) => !liveOf(x.id)) ?? vehicles[0])?.id);
   const v = vehicles.find((x) => x.id === vehicleId);
   const free = v ? freeSpotsFor(state, park, now, now + 60 * 60000, now, v.type).length : 0;
   const closed = hoursError(park, now, now + 15 * 60000);
-  const active = state.bookings.find((b) => b.userId === me.id && b.status === 'em_curso');
+  const active = v ? liveOf(v.id) : undefined;
 
   const request = () => {
     if (!v) return;
@@ -40,7 +42,7 @@ export function ImmediateScreen({ navigation }: UProps<'Immediate'>) {
       </Card>
       <Text style={{ fontWeight: '600', marginBottom: 6 }}>Veículo</Text>
       {vehicles.map((x) => (
-        <OptionCard key={x.id} label={x.plate} sub={`${x.type === 'automovel' ? 'Automóvel' : 'Motociclo'} · ${x.model}`} icon={x.type === 'automovel' ? 'car-outline' : 'bicycle-outline'} active={x.id === vehicleId} onPress={() => setVehicleId(x.id)} />
+        <OptionCard key={x.id} label={x.plate} sub={`${x.type === 'automovel' ? 'Automóvel' : 'Motociclo'} · ${x.model}${liveOf(x.id) ? ' · Estadia em curso' : ''}`} icon={x.type === 'automovel' ? 'car-outline' : 'bicycle-outline'} active={x.id === vehicleId} onPress={() => setVehicleId(x.id)} />
       ))}
       <Card>
         <InfoRow label="Lugares livres agora" value={String(free)} strong />
@@ -48,7 +50,7 @@ export function ImmediateScreen({ navigation }: UProps<'Immediate'>) {
         <InfoRow label="Pagamento" value="À saída, por MB WAY" />
       </Card>
       {closed && <InfoBox tone="danger" text={closed} />}
-      {active && <InfoBox tone="warning" text="Já tem uma estadia em curso. Termine-a antes de pedir outro lugar." />}
+      {active && v && <InfoBox tone="warning" text={`O veículo ${v.plate} já tem uma estadia em curso (lugar ${spotLabel(state, active.spotId)?.code}). Termine-a ou escolha outro veículo.`} />}
       <InfoBox text="Será notificado do valor a pagar quando sair do parque." />
     </Screen>
   );
@@ -111,14 +113,18 @@ export function PassesScreen() {
   const nav = useUNav();
   const { state, park, now, dispatch } = useApp();
   const me = useMe();
-  const pass = activePass(state, me.id, park.id, now);
-  const others = state.passes.filter((p) => p.userId === me.id && p.id !== pass?.id).sort((a, b) => b.to - a.to);
+  const passes = activePasses(state, me.id, park.id, now);
+  const ids = new Set(passes.map((p) => p.id));
+  const others = state.passes.filter((p) => p.userId === me.id && !ids.has(p.id)).sort((a, b) => b.to - a.to);
+  // Uma avença por veículo: só se pode pedir outra se houver um veículo sem avença ativa neste parque.
+  const freeVehicles = vehiclesOf(state, me.id).filter((v) => !vehiclePass(state, v.id, park.id, now));
 
   return (
     <Screen title="Avenças">
       <ParkSelector onPress={() => nav.navigate('SelectPark')} />
-      {pass ? (
-        <>
+      {passes.length > 1 && <SectionTitle title={`Avenças ativas (${passes.length})`} />}
+      {passes.map((pass) => (
+        <View key={pass.id}>
           <Card tone="success">
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
               <Text style={{ fontWeight: '800', fontSize: 16 }}>Avença {PLAN_INFO[pass.plan].title.toLowerCase()}</Text>
@@ -131,9 +137,13 @@ export function PassesScreen() {
           <QRCard value={`PARKUPB|AVENCA|${pass.code}|${pass.to}`} title="QR da avença" text="Entre e saia quantas vezes precisar. Ativo apenas durante a vigência." code={pass.code} plate={vehicleById(state, pass.vehicleId)?.plate} />
           <Button title={`Renovar por mais 30 dias · ${euro(pass.plan === '24h' ? park.prices.pass24 : park.prices.passDay)}`} icon="refresh" onPress={() => dispatch({ type: 'RENEW_PASS', passId: pass.id, now })} />
           <View style={{ height: 16 }} />
-        </>
-      ) : (
+        </View>
+      ))}
+      {passes.length === 0 && (
         <EmptyState icon="card-outline" title="Sem avença ativa neste parque" text="Estaciona com frequência? Escolha um plano à sua medida." />
+      )}
+      {passes.length > 0 && freeVehicles.length === 0 && (
+        <InfoBox text="Todos os seus veículos já têm avença ativa neste parque. Adicione outro veículo para pedir uma nova avença." />
       )}
       <SectionTitle title="Planos disponíveis" />
       {(['24h', 'diurna'] as PassPlan[]).map((plan) => (
@@ -144,7 +154,7 @@ export function PassesScreen() {
           </View>
           <Text style={{ fontSize: 22, fontWeight: '900', color: colors.primary, marginVertical: 6 }}>{euro(plan === '24h' ? park.prices.pass24 : park.prices.passDay)} / mês</Text>
           <Text style={{ color: colors.muted, marginBottom: 10 }}>{PLAN_INFO[plan].text}</Text>
-          <Button title="Pedir avença" small variant="secondary" disabled={!!pass || me.status !== 'ativa'} onPress={() => nav.navigate('BuyPass', { plan })} />
+          <Button title="Pedir avença" small variant="secondary" disabled={freeVehicles.length === 0 || me.status !== 'ativa'} onPress={() => nav.navigate('BuyPass', { plan })} />
         </Card>
       ))}
       {others.length > 0 && <SectionTitle title="Avenças anteriores ou de outros parques" />}
@@ -164,12 +174,13 @@ export function BuyPassScreen({ route, navigation }: UProps<'BuyPass'>) {
   const { state, park, now, dispatch } = useApp();
   const me = useMe();
   const vehicles = vehiclesOf(state, me.id);
-  const [vehicleId, setVehicleId] = useState(vehicles[0]?.id);
+  const hasPass = (vid: string) => !!vehiclePass(state, vid, park.id, now);
+  const [vehicleId, setVehicleId] = useState(vehicles.find((x) => !hasPass(x.id))?.id);
   const [method, setMethod] = useState<PaymentMethod>('MB WAY');
   const amount = plan === '24h' ? park.prices.pass24 : park.prices.passDay;
 
   const buy = () => {
-    if (!vehicleId) return;
+    if (!vehicleId || hasPass(vehicleId)) return;
     dispatch({ type: 'BUY_PASS', userId: me.id, parkId: park.id, vehicleId, plan, method, now });
     navigation.goBack();
   };
@@ -183,8 +194,9 @@ export function BuyPassScreen({ route, navigation }: UProps<'BuyPass'>) {
       </Card>
       <Text style={{ fontWeight: '600', marginBottom: 6 }}>Matrícula associada</Text>
       {vehicles.map((x) => (
-        <OptionCard key={x.id} label={x.plate} sub={x.model} icon={x.type === 'automovel' ? 'car-outline' : 'bicycle-outline'} active={x.id === vehicleId} onPress={() => setVehicleId(x.id)} />
+        <OptionCard key={x.id} label={x.plate} sub={hasPass(x.id) ? `${x.model} · Já tem avença ativa neste parque` : x.model} icon={x.type === 'automovel' ? 'car-outline' : 'bicycle-outline'} active={x.id === vehicleId} disabled={hasPass(x.id)} onPress={() => setVehicleId(x.id)} />
       ))}
+      <Text style={{ color: colors.muted, fontSize: 12, marginBottom: 10 }}>Cada veículo pode ter uma avença ativa por parque.</Text>
       <Card>
         <InfoRow label="Início" value={`${date(now)} · ${time(now)}`} />
         <InfoRow label="Fim" value={date(now + 30 * DAY)} />

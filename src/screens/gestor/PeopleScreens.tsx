@@ -7,7 +7,7 @@ import {
 } from '../../components';
 import { colors } from '../../theme';
 import { useApp, useMe } from '../../store/AppContext';
-import { activePass, bookingsOf, incidents, spotLabel, userById, vehicleById, vehiclesOf } from '../../store/selectors';
+import { activePasses, bookingsOf, incidents, spotLabel, userById, vehicleById, vehiclesOf } from '../../store/selectors';
 import { GProps, useGNav } from '../../navigation/types';
 import { HOUR, MIN, at, dateShort, dateTime, euro, isValidPlate, normalizePlate, time, uid } from '../../utils/format';
 import { fractions, fractionValue } from '../../utils/rules';
@@ -89,7 +89,7 @@ export function UserDetailScreen({ route, navigation }: GProps<'UserDetail'>) {
   const vs = vehiclesOf(state, u.id);
   const all = bookingsOf(state, u.id);
   const active = all.filter((b) => b.status === 'em_curso' || (b.status === 'confirmada' && b.end > now));
-  const pass = activePass(state, u.id, park.id, now);
+  const passes = activePasses(state, u.id, park.id, now);
   const payments = all.filter((b) => b.paid && b.amount > 0).slice(0, 5);
   const sb = statusBadge.account(u.status);
 
@@ -121,9 +121,11 @@ export function UserDetailScreen({ route, navigation }: GProps<'UserDetail'>) {
           <Text style={{ color: colors.muted }}>{dateShort(b.start)} · {time(b.start)}–{time(b.end)} · {b.paid ? `${euro(b.amount)} · Pago na app` : 'Pagamento à saída'}</Text>
         </Card>
       ))}
-      <SectionTitle title="Avença" />
+      <SectionTitle title={passes.length > 1 ? `Avenças (${passes.length})` : 'Avença'} />
       <Card>
-        {pass ? <InfoRow label={pass.plan === '24h' ? 'Mensal 24 horas' : 'Mensal diurna'} value={`até ${dateShort(pass.to)}`} /> : <Text style={{ color: colors.muted }}>Sem avença neste parque.</Text>}
+        {passes.length ? passes.map((p) => (
+          <InfoRow key={p.id} label={`${p.plan === '24h' ? 'Mensal 24 horas' : 'Mensal diurna'} · ${vehicleById(state, p.vehicleId)?.plate ?? ''}`} value={`até ${dateShort(p.to)}`} />
+        )) : <Text style={{ color: colors.muted }}>Sem avença neste parque.</Text>}
       </Card>
       <SectionTitle title="Histórico de pagamentos" />
       <Card>

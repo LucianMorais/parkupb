@@ -40,11 +40,11 @@ export function ChipGroup<T extends string>({ options, value, onChange, scroll =
 }
 
 /** Seletor grande com ícone (tipo de veículo, método de pagamento, plano). */
-export function OptionCard({ label, sub, icon, active, onPress }: {
-  label: string; sub?: string; icon?: keyof typeof Ionicons.glyphMap; active: boolean; onPress: () => void;
+export function OptionCard({ label, sub, icon, active, onPress, disabled }: {
+  label: string; sub?: string; icon?: keyof typeof Ionicons.glyphMap; active: boolean; onPress: () => void; disabled?: boolean;
 }) {
   return (
-    <Pressable onPress={onPress} style={[styles.option, active && styles.optionActive]} accessibilityRole="radio" accessibilityState={{ checked: active }}>
+    <Pressable onPress={onPress} disabled={disabled} style={[styles.option, active && styles.optionActive, disabled && { opacity: 0.5 }]} accessibilityRole="radio" accessibilityState={{ checked: active, disabled }}>
       {icon && <Ionicons name={icon} size={20} color={active ? colors.primary : colors.muted} />}
       <View style={{ flex: 1 }}>
         <Text style={[styles.optionLabel, active && { color: colors.primary }]}>{label}</Text>

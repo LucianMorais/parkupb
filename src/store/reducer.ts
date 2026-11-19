@@ -106,6 +106,8 @@ export function reducer(state: AppState, a: Action): AppState {
       // RFC2: o sistema atribui o primeiro lugar livre (sem possibilidade de alteração).
       const park = state.parks.find((p) => p.id === a.parkId)!;
       const v = state.vehicles.find((x) => x.id === a.vehicleId)!;
+      // Uma estadia em curso por veículo.
+      if (state.bookings.some((b) => b.vehicleId === v.id && b.status === 'em_curso')) return state;
       const free = freeSpotsFor(state, park, a.now, a.now + 2 * 60 * MIN, a.now, v.type)
         .filter((sp) => (v.type === 'motociclo' ? sp.kind === 'motociclo' : sp.kind === 'normal'));
       const sp = free[0] ?? freeSpotsFor(state, park, a.now, a.now + 60 * MIN, a.now, v.type)[0];
@@ -133,6 +135,8 @@ export function reducer(state: AppState, a: Action): AppState {
       return patchBooking(state, b.id, { status: 'concluida', checkOut: a.now });
     }
     case 'BUY_PASS': {
+      // Uma avença ativa por veículo em cada parque (veículos diferentes podem ter avenças em simultâneo).
+      if (state.passes.some((p) => p.vehicleId === a.vehicleId && p.parkId === a.parkId && p.to > a.now && p.from <= a.now)) return state;
       const park = state.parks.find((p) => p.id === a.parkId)!;
       const priceCents = a.plan === '24h' ? park.prices.pass24 : park.prices.passDay;
       const pass = {

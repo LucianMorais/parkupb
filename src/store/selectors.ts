@@ -17,7 +17,19 @@ export function nextBooking(s: AppState, userId: string, now: number): Booking |
 }
 
 export function activePass(s: AppState, userId: string, parkId: string, now: number) {
-  return s.passes.find((p) => p.userId === userId && p.parkId === parkId && p.to > now && p.from <= now);
+  return activePasses(s, userId, parkId, now)[0];
+}
+
+/** Avenças ativas do utente num parque (no máximo uma por veículo). */
+export function activePasses(s: AppState, userId: string, parkId: string, now: number) {
+  return s.passes
+    .filter((p) => p.userId === userId && p.parkId === parkId && p.to > now && p.from <= now)
+    .sort((a, b) => a.from - b.from);
+}
+
+/** Avença ativa de um veículo num parque. */
+export function vehiclePass(s: AppState, vehicleId: string, parkId: string, now: number) {
+  return s.passes.find((p) => p.vehicleId === vehicleId && p.parkId === parkId && p.to > now && p.from <= now);
 }
 
 export const unread = (s: AppState, userId: string) => s.notifications.filter((n) => n.userId === userId && !n.read).length;
