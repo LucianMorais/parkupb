@@ -1,11 +1,23 @@
 import React, { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Park, User } from '../types/models';
-import { createSeed } from '../data/seed';
+import { DEMO, createSeed } from '../data/seed';
 import { Action, reducer } from './reducer';
 import { dayKey } from '../utils/format';
 
 const STORAGE_KEY = 'parkupb:state:v1';
+
+// Garante que as contas de demonstração (utente, gestor, admin) existem sempre,
+// mesmo que os dados guardados sejam de uma versão anterior ou a conta tenha sido apagada.
+function withDemoAccounts(saved: AppState): AppState {
+  const demoEmails = Object.values(DEMO).map((d) => d.email);
+  const missing = createSeed().users.filter(
+    (u) => demoEmails.includes(u.email) && !saved.users.some((x) => x.email.toLowerCase() === u.email),
+  );
+  if (!missing.length) return saved;
+  const ids = new Set(missing.map((m) => m.id));
+  return { ...saved, users: [...saved.users.filter((x) => !ids.has(x.id)), ...missing] };
+}
 
 interface Ctx {
   state: AppState;
@@ -38,7 +50,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const raw = await AsyncStorage.getItem(STORAGE_KEY);
         if (raw) {
           const saved = JSON.parse(raw) as AppState;
-          if (saved.seedDay === dayKey(Date.now())) dispatch({ type: 'HYDRATE', state: saved });
+          if (saved.seedDay === dayKey(Date.now())) dispatch({ type: 'HYDRATE', state: withDemoAccounts(saved) });
         }
       } catch {
         // Sem persistência disponível: a app continua só em memória.

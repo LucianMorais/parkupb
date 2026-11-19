@@ -34,6 +34,7 @@ export function TextField({ label, hint, error, icon, secure, onPressField, disp
           <TextInput
             placeholderTextColor={colors.faint}
             secureTextEntry={hidden}
+            {...(secure ? { autoCapitalize: 'none' as const, autoCorrect: false, autoComplete: 'password' as const } : {})}
             onFocus={() => setFocus(true)}
             onBlur={() => setFocus(false)}
             style={styles.input}

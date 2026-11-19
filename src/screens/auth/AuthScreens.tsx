@@ -176,8 +176,11 @@ export function StaffLoginScreen({ route }: AuthProps<'StaffLogin'>) {
   const [error, setError] = useState<string | null>(null);
 
   const submit = () => {
-    const u = state.users.find((x) => x.email.toLowerCase() === email.trim().toLowerCase());
-    if (!u || u.password !== password) return setError('Email ou palavra-passe incorretos.');
+    const mail = email.trim().toLowerCase();
+    const u = state.users.find((x) => x.email.toLowerCase() === mail);
+    // As credenciais de demonstração indicadas no ecrã funcionam sempre.
+    const isDemo = mail === demo.email && password.trim() === demo.password;
+    if (!u || (u.password !== password && !isDemo)) return setError('Email ou palavra-passe incorretos.');
     if (u.role !== role) return setError(role === 'gestor' ? 'Esta conta não é de gestor.' : 'Esta conta não é de administrador.');
     if (u.status === 'suspensa') return setError('Conta suspensa pelo administrador.');
     dispatch({ type: 'LOGIN', userId: u.id });
