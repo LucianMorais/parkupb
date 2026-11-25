@@ -203,7 +203,19 @@ export function CreateParkScreen({ navigation }: AProps<'CreatePark'>) {
   const { dispatch } = useApp();
   const [step, setStep] = useState(0);
   const [d, setD] = useState({ name: '', address: '', open24: false, openTime: '07:00', closeTime: '23:00' });
-  const [prices, setPrices] = useState<Prices>({ carHour: 100, motoHour: 50, pass24: 5000, passDay: 3000 });
+  // O texto escrito fica num rascunho; só é convertido para cêntimos ao validar e criar o parque.
+  const [priceDraft, setPriceDraft] = useState({ carHour: '1,00', pass24: '50,00' });
+  const parsePrice = (value: string) => {
+    const normalized = value.trim().replace(',', '.');
+    return normalized ? Math.round(Number(normalized) * 100) : NaN;
+  };
+  const prices: Prices = {
+    carHour: parsePrice(priceDraft.carHour),
+    motoHour: 50,
+    pass24: parsePrice(priceDraft.pass24),
+    passDay: 3000,
+  };
+  const validPrices = prices.carHour > 0 && prices.pass24 > 0;
   const [floors, setFloors] = useState<FloorDraft[]>([
     { name: 'Piso -1', zone: 'A', count: 20, mobility: 1, moto: 2 },
     { name: 'Piso 0', zone: 'B', count: 24, mobility: 2, moto: 2 },
@@ -215,6 +227,7 @@ export function CreateParkScreen({ navigation }: AProps<'CreatePark'>) {
   const validStep0 = d.name.trim().length > 3 && d.address.trim().length > 3;
 
   const create = () => {
+    if (!validPrices) return;
     const park: Park = {
       id: `${id}-${uid('p').slice(-4)}`, name: d.name.trim(), address: d.address.trim(), area: d.address.split(',')[0], lat: 41.81, lng: -6.757,
       open24: d.open24, openTime: d.open24 ? '00:00' : d.openTime, closeTime: d.open24 ? '23:59' : d.closeTime, active: true, prices, floors: [],
@@ -225,11 +238,11 @@ export function CreateParkScreen({ navigation }: AProps<'CreatePark'>) {
   };
 
   const footer = step === 0
-    ? <Button title="Continuar" disabled={!validStep0} onPress={() => setStep(1)} />
+    ? <Button title="Continuar" disabled={!validStep0 || !validPrices} onPress={() => setStep(1)} />
     : (
       <View style={{ flexDirection: 'row', gap: 10 }}>
         <Button title="Voltar" variant="secondary" onPress={() => setStep(step - 1)} style={{ flex: 1 }} />
-        <Button title={step === 1 ? 'Rever parque' : 'Criar parque'} onPress={() => (step === 1 ? setStep(2) : create())} disabled={total === 0} style={{ flex: 1 }} />
+        <Button title={step === 1 ? 'Rever parque' : 'Criar parque'} onPress={() => (step === 1 ? setStep(2) : create())} disabled={total === 0 || !validPrices} style={{ flex: 1 }} />
       </View>
     );
 
@@ -243,11 +256,12 @@ export function CreateParkScreen({ navigation }: AProps<'CreatePark'>) {
           <HoursFields value={d} onChange={(h) => setD({ ...d, ...h })} />
           <SectionTitle title="Preços iniciais" />
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <TextField style={{ flex: 1 }} label="Automóvel · €/hora" value={(prices.carHour / 100).toFixed(2).replace('.', ',')} keyboardType="decimal-pad"
-              onChangeText={(t) => setPrices({ ...prices, carHour: Math.round(Number(t.replace(',', '.')) * 100) || 0 })} />
-            <TextField style={{ flex: 1 }} label="Avença 24 h · €/mês" value={(prices.pass24 / 100).toFixed(2).replace('.', ',')} keyboardType="decimal-pad"
-              onChangeText={(t) => setPrices({ ...prices, pass24: Math.round(Number(t.replace(',', '.')) * 100) || 0 })} />
+            <TextField style={{ flex: 1 }} label="Automóvel · €/hora" value={priceDraft.carHour} keyboardType="decimal-pad"
+              onChangeText={(t) => setPriceDraft((draft) => ({ ...draft, carHour: t }))} />
+            <TextField style={{ flex: 1 }} label="Avença 24 h · €/mês" value={priceDraft.pass24} keyboardType="decimal-pad"
+              onChangeText={(t) => setPriceDraft((draft) => ({ ...draft, pass24: t }))} />
           </View>
+          {!validPrices && <InfoBox tone="danger" text="Os preços têm de ser valores superiores a zero." />}
         </>
       )}
       {step === 1 && (

@@ -65,9 +65,11 @@ const overlaps = (a1: number, a2: number, b1: number, b2: number) => a1 < b2 && 
  * Fim efetivo de uma estadia.
  * Se uma estadia em curso já excedeu a hora de saída, o veículo continua no lugar e não se sabe
  * quando sai: o lugar fica ocupado até ser registada a saída (pelo utente ou pelo gestor).
+ * Uma ocupação marcada pelo gestor (sem utente associado) também não tem hora de saída conhecida.
  */
 function effectiveEnd(b: Booking, now: number) {
   if (b.status !== 'em_curso') return b.end;
+  if (!b.userId) return Infinity;
   return b.end > now ? b.end : Infinity;
 }
 
